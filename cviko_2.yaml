@@ -1,0 +1,40 @@
+heat_template_version: rocky
+parameters:
+    nazovSiete:
+        type: string
+        label: Názov siete
+        default: ext-net
+    availabilityZone:
+        type: string
+        label: Availability zone
+        default: compute1
+    flavor:
+        type: string
+        label: Flavor
+        default: nano
+    image:
+        type: string
+        label: Image
+        default: cirros
+        
+resources:
+    server1:
+        type: OS::Nova::Server
+        properties:
+            name: server1
+            image: { get_param: image }
+            flavor: { get_param: flavor }
+            networks:
+                - network: { get_param: nazovSiete }
+            availability_zone: { get_param: availabilityZone }
+            
+            
+    server2:
+        type: OS::Nova::Server
+        properties:
+            name: server2
+            image: { get_param: image }
+            flavor: { get_param: flavor }
+            networks:
+                - network: { get_param: nazovSiete }
+            availability_zone: { get_param: availabilityZone }
