@@ -53,9 +53,8 @@ resources:
       user_data_update_policy: REPLACE
       key_name: SSH
       networks:
-      - subnet: { get_resource: subnet }
+      - subnet: { get_resource: PrivateSubnet }
       user_data_format: RAW
-      user_data: {
+      user_data: |
         #!/bin/bash
         apt-get update -y
-      }
