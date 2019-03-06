@@ -1,0 +1,30 @@
+heat_template_version: rocky
+  
+resources:
+  Net: 
+    type: OS::Neutron::Net
+    properties:
+      admin_state_up: True
+      name: network
+      shared: False
+      
+  PrivateSubnet:
+    type: OS::Neutron::Subnet
+    properties:
+      name: subnet
+      cidr: 10.0.0.0/24
+      dns_nameservers:
+      - 8.8.8.8
+      - 8.8.4.4
+      enable_dhcp: True
+      network: { get_resource: Net }
+      
+  Router:
+    type: OS::Neutron::Router
+    properties:
+      admin_state_up: True
+      name: Router
+      external_gateway_info: { 
+        enable_snat: True,
+        network: ext-net  
+      }
