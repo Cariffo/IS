@@ -1,0 +1,209 @@
+heat_template_version: 2016-04-08
+
+description: v1.0.0 Template for network
+
+parameters:
+  NetName:
+    description: NetName
+    type: string
+    default: network
+
+  RouterName:
+    description: RouterName
+    type: string
+    default: router
+
+  PrivateSubnetsCidr:
+    description: PrivateSubnetsCidr
+    type: string
+    label: CIDR
+    default: 10.0.0.0/24
+    #constraints:
+    # -length: { min: 6, max: 8}
+
+
+resources:
+  Net:
+    type: OS::Neutron::Net
+    properties:
+      admin_state_up: True
+      name: { get_param: NetName }
+      shared: False
+
+
+  PrivateSubnet:
+    type: OS::Neutron::Subnet
+    properties:
+      name: subnet
+      cidr: { get_param: PrivateSubnetsCidr }
+      dns_nameservers:
+        - 8.8.8.8
+        - 8.8.4.4
+      enable_dhcp: True
+      network: { get_resource: Net }
+
+  Router:
+    type: OS::Neutron::Router
+    properties:
+      admin_state_up: True
+      name: { get_param: RouterName }
+      external_gateway_info: {
+        enable_snat: True,
+        network: ext-net
+      }
+
+  RouterPort:
+    type: OS::Neutron::Port
+    properties:
+      name: RouterPort
+      fixed_ips:
+        - ip_address: 10.0.0.1
+      network: { get_resource: Net }
+
+  RouterInterface:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router: { get_resource: Router }
+      port: { get_resource: RouterPort }
+
+  JumpPort:
+    type: OS::Neutron::Port
+    properties:
+      name: JumpPort
+      network: { get_resource: Net }
+      security_groups:
+        - { get_resource: JumpPrivateSecurityGroup }
+
+  JumpPrivateSecurityGroup:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: jumpPrivateSecurityGroup
+      rules: [
+      { direction: ingress, ethertype: IPv4, protocol: tcp, port_range_min: 22, port_range_max: 22, remote_ip_prefix: 158.193.0.0/16 },
+      { direction: ingress, ethertype: IPv4, protocol: icmp, remote_ip_prefix: 158.193.0.0/16 },
+      { direction: ingress, ethertype: IPv4, protocol: icmp, remote_ip_prefix: 10.0.0.0/24 },
+      { direction: ingress, ethertype: IPv4, protocol: tcp, port_range_min: 80, port_range_max: 80, remote_ip_prefix: 158.193.0.0/16 },
+      { direction: ingress, ethertype: IPv4, protocol: udp, port_range_min: 80, port_range_max: 80, remote_ip_prefix: 158.193.0.0/16 },
+
+      { direction: egress, ethertype: IPv4, protocol: tcp, port_range_min: 1, port_range_max: 65535, remote_ip_prefix: 0.0.0.0/0 },
+      { direction: egress, ethertype: IPv4, protocol: udp, port_range_min: 1, port_range_max: 65535, remote_ip_prefix: 0.0.0.0/0 },
+
+      { direction: egress, ethertype: IPv4, protocol: icmp, remote_ip_prefix: 0.0.0.0/0 }
+      ]
+
+  Jump:
+    type: OS::Nova::Server
+    properties:
+      name: jump
+      availability_zone: compute1
+      flavor: linux
+      image: ubuntu_server_18.04_amd64_Openstack
+      user_data_update_policy: REPLACE
+      key_name: sshKeyCv3
+      networks:
+        - port: { get_resource: JumpPort }
+      user_data_format: RAW
+      user_data: |
+        #!/bin/bash
+        apt-get update -y
+
+  JumpFloatingIp:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network: ext-net
+  JumpFloatingAssociation:
+    type: OS::Neutron::FloatingIPAssociation
+    properties:
+      floatingip_id: { get_resource: JumpFloatingIp }
+      port_id: { get_resource: JumpPort }
+
+  SquidSecurityGroup:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: SquidSecurityGroup
+      rules: [
+      #{ direction: ingress, ethertype: IPv4, protocol: tcp, port_range_min: 22, port_range_max: 22, remote_ip_prefix: 10.0.0.0/24 },
+      #{ direction: ingress, ethertype: IPv4, protocol: icmp, remote_ip_prefix: 10.0.0.0/24 },
+      #{ direction: egress, ethertype: IPv4, protocol: icmp, remote_ip_prefix: 10.0.0.0/24 },
+      #{ direction: egress, ethertype: IPv4, remote_ip_prefix: 10.0.0.0/24 },
+      #{ direction: ingress, ethertype: IPv4, remote_ip_prefix: 10.0.0.0/24 },
+      #{ direction: ingress, ethertype: IPv4, protocol: tcp, port_range_min: 22, port_range_max: 22, remote_ip_prefix: 158.193.0.0/16 },
+      #{ direction: ingress, ethertype: IPv4, protocol: icmp, remote_ip_prefix: 0.0.0.0/0 },
+      #{ direction: ingress, ethertype: IPv4, protocol: tcp, port_range_min: 1, port_range_max: 65535, remote_ip_prefix: 0.0.0.0/0 },
+      #{ direction: ingress, ethertype: IPv4, protocol: udp, port_range_min: 1, port_range_max: 65535, remote_ip_prefix: 0.0.0.0/0 },
+
+      { direction: ingress, ethertype: IPv4, protocol: tcp, port_range_min: 1, port_range_max: 65535, remote_ip_prefix: 0.0.0.0/0 },
+      { direction: ingress, ethertype: IPv4, remote_ip_prefix: 0.0.0.0/0 },
+      { direction: egress, ethertype: IPv4, remote_ip_prefix: 0.0.0.0/0 }
+      ]
+
+
+  SquidPort:
+    type: OS::Neutron::Port
+    properties:
+      name: SquidPort
+      network: { get_resource: Net }
+      fixed_ips:
+        - ip_address: 10.0.0.151
+      security_groups:
+        - { get_resource: SquidSecurityGroup }
+
+  Squid:
+    type: OS::Nova::Server
+    properties:
+      name: squid
+      availability_zone: compute1
+      flavor: linux
+      image: ubuntu_server_18.04_amd64_Openstack
+      user_data_update_policy: REPLACE
+      key_name: sshKeyCv3
+      networks:
+        - port: { get_resource: SquidPort }
+      user_data: |
+        #!/bin/bash
+        apt-get update -y
+        apt-get get install squid
+
+  ApacheSecurityGroup:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: ApacheSecurityGroup
+      rules: [
+      #{ direction: ingress, ethertype: IPv4, protocol: tcp, port_range_min: 80, port_range_max: 80, remote_ip_prefix: 10.0.0.0/24 },
+      #{ direction: ingress, ethertype: IPv4, protocol: udp, port_range_min: 80, port_range_max: 80, remote_ip_prefix: 10.0.0.0/24 },
+      #{ direction: ingress, ethertype: IPv4, protocol: tcp, port_range_min: 22, port_range_max: 22, remote_ip_prefix: 10.0.0.0/24 },
+      #{ direction: egress, ethertype: IPv4, remote_ip_prefix: 10.0.0.0/24 },
+      #{ direction: ingress, ethertype: IPv4, remote_ip_prefix: 10.0.0.0/24 },
+      #{ direction: ingress, ethertype: IPv4, protocol: tcp, port_range_min: 1, port_range_max: 65535, remote_ip_prefix: 0.0.0.0/0 },
+      #{ direction: ingress, ethertype: IPv4, protocol: udp, port_range_min: 1, port_range_max: 65535, remote_ip_prefix: 0.0.0.0/0 },
+      #{ direction: egress, ethertype: IPv4, protocol: tcp, port_range_min: 1, port_range_max: 65535, remote_ip_prefix: 0.0.0.0/0 },
+      #{ direction: egress, ethertype: IPv4, protocol: udp, port_range_min: 1, port_range_max: 65535, remote_ip_prefix: 0.0.0.0/0 },
+      { direction: ingress, ethertype: IPv4, remote_ip_prefix: 0.0.0.0/0 },
+      { direction: egress, ethertype: IPv4, remote_ip_prefix: 0.0.0.0/0 }
+      ]
+
+  Apache2Port:
+    type: OS::Neutron::Port
+    properties:
+      name: Apache2Port
+      network: { get_resource: Net }
+      fixed_ips:
+        - ip_address: 10.0.0.150
+      security_groups:
+        - { get_resource: ApacheSecurityGroup }
+
+  Apache2:
+    type: OS::Nova::Server
+    properties:
+      name: apache2
+      availability_zone: compute1
+      flavor: linux
+      image: ubuntu_server_18.04_amd64_Openstack
+      user_data_update_policy: REPLACE
+      key_name: sshKeyCv3
+      networks:
+        - port: { get_resource: Apache2Port }
+      user_data: |
+        #!/bin/bash
+        apt-get update -y
+        apt-get get install apache2

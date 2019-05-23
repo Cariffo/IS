@@ -1,0 +1,181 @@
+heat_template_version: rocky
+
+parameters:
+  flavor:
+    type: string
+    label: Flavor
+    default: linux
+  enet:
+    type: string
+    label: Network
+    default: ext-net
+  zone:
+    type: string
+    label: Zone
+    default: compute1
+  image:
+    type: string
+    label: Image
+    default: Debian_9.5.0_Openstack
+  RouterName:
+    description: RouterName
+    type: string
+    default: router
+  net:
+    description: NetName
+    type: string
+    default: net
+  PrivateSubnetsCidr1:
+    description: PrivateSubnetsCidr1
+    type: string
+    label: CIDR
+    default: 192.168.10.0/24
+    #constraints:
+    # -length: { min: 6, max: 8}
+    
+  PrivateSubnetsCidr2:
+    description: PrivateSubnetsCidr2
+    type: string
+    label: CIDR
+    default: 172.16.10.0/24
+    #constraints:
+    # -length: { min: 6, max: 8}
+    
+resources:
+  Net:
+    type: OS::Neutron::Net
+    properties:
+      admin_state_up: True
+      name: { get_param: net }
+      shared: False
+
+  PrivateSubnet1:
+    type: OS::Neutron::Subnet
+    properties:
+      name: subnet1
+      cidr: { get_param: PrivateSubnetsCidr1 }
+      dns_nameservers:
+        - 8.8.8.8
+        - 8.8.4.4
+      enable_dhcp: True
+      network: { get_resource: Net }
+      
+  PrivateSubnet2:
+    type: OS::Neutron::Subnet
+    properties:
+      name: subnet2
+      cidr: { get_param: PrivateSubnetsCidr2 }
+      dns_nameservers:
+        - 8.8.8.8
+        - 8.8.4.4
+      enable_dhcp: True
+      network: { get_resource: Net }
+
+  Router:
+    type: OS::Neutron::Router
+    properties:
+      admin_state_up: True
+      name: { get_param: RouterName }
+      external_gateway_info: {
+        enable_snat: True,
+        network: { get_param: enet }
+      }
+
+  RouterPort1:
+    type: OS::Neutron::Port
+    properties:
+      name: RouterPort1
+      fixed_ips:
+        - ip_address: 192.168.10.1
+      network: { get_resource: Net }
+      
+  RouterPort2:
+    type: OS::Neutron::Port
+    properties:
+      name: RouterPort2
+      fixed_ips:
+        - ip_address: 172.16.10.1
+      network: { get_resource: Net }
+
+  RouterInterface1:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router: { get_resource: Router }
+      port: { get_resource: RouterPort1 }
+
+  RouterInterface2:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router: { get_resource: Router }
+      port: { get_resource: RouterPort2 }
+
+  SecurityGroup1:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: SecurityGroup1
+      rules: [
+      { direction: ingress, ethertype: IPv4, protocol: tcp, port_range_min: 80, port_range_max: 80, remote_ip_prefix: 158.193.0.0/16 },
+      { direction: ingress, ethertype: IPv4, protocol: icmp, remote_ip_prefix: 0.0.0.0/0 }
+      ]
+
+  S1Port:
+    type: OS::Neutron::Port
+    properties:
+      name: S1Port
+      network: { get_resource: Net }
+      fixed_ips:
+        - ip_address: 192.168.10.10
+      security_groups:
+        - { get_resource: SecurityGroup1 }
+
+  server1:
+    type: OS::Nova::Server
+    properties:
+      name: server1
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      networks:
+        - network: { get_param: net }
+      availability_zone: {get_param: zone }
+      networks:
+        - port: { get_resource: S1Port }
+      user_data_format: RAW
+      user_data: |
+        #!/bin/bash
+        apt-get update -y
+        apt-get get install mc
+
+  SecurityGroup2:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: SecurityGroup2
+      rules: [
+      { direction: ingress, ethertype: IPv4, protocol: tcp, port_range_min: 80, port_range_max: 80, remote_ip_prefix: 158.193.0.0/16 },
+      {  direction: ingress, ethertype: IPv4, protocol: icmp, remote_ip_prefix: 0.0.0.0/0 }
+      ]
+
+  S2Port:
+    type: OS::Neutron::Port
+    properties:
+      name: S2Port
+      network: { get_resource: Net }
+      fixed_ips:
+        - ip_address: 172.16.10.20
+      security_groups:
+        - { get_resource: SecurityGroup2 } 
+  server2:
+    type: OS::Nova::Server
+    properties:
+      name: server2
+      image: { get_param: image }
+      flavor: {get_param: flavor }
+      networks:
+        - network: { get_param: net }
+      availability_zone: { get_param: zone}
+      networks:
+        - port: { get_resource: S2Port }
+      user_data_format: RAW
+      user_data: |
+        #!/bin/bash
+        apt-get update -y
+        apt-get get install mc

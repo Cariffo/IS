@@ -1,0 +1,227 @@
+heat_template_version: 2016-04-08
+description: Template for lesson 2 Jump, Proxy and App-server
+
+parameters:
+  project_name:
+    label: Name of project
+    type: string
+    default: Jump,proxy,Appserver
+
+  network_name:
+    description: Name of network
+    type: string
+    default: network
+
+  Router_name:
+    description: Name of router
+    type: string
+    default: router
+
+  PrivateSubnetCidr:
+    label: Prefix of internal network
+    description: IPv4 prefix of internal network
+    type: string
+    default: 10.0.0.0/24
+
+resources:
+  Net:
+    type: OS::Neutron::Net
+    properties:
+      admin_state_up: true
+      name: {get_param: network_name}
+      #shared: false
+
+  privateSubnet:
+    type: OS::Neutron::Subnet
+    properties:
+      name: { list_join: [ '-', [ { get_param: project_name }, 'net' ] ] }
+      cidr: {get_param: PrivateSubnetCidr}
+      dns_nameservers:
+        - 8.8.8.8
+        - 8.8.4.4
+      enable_dhcp: True
+      network: {get_resource: Net}
+
+  Router:
+    type: OS::Neutron::Router
+    properties:
+      admin_state_up: True
+      name: {get_param: Router_name}
+      external_gateway_info: {
+        enable_snat: True,
+        network: ext-net
+      }
+
+  RouterPort:
+    type: OS::Neutron::Port
+    properties:
+      name: RouterPort
+      fixed_ips:
+        - ip_address: 10.0.0.1
+      network: {get_resource: Net}
+
+  RouterInterface:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router: {get_resource: Router}
+      port: {get_resource: RouterPort}
+
+  jump_secgroup:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: Jump-security-group
+      rules:
+        - protocol: tcp
+          direction: ingress
+          remote_ip_prefix: 158.193.0.0/16
+          port_range_max: 22
+          port_range_min: 22
+        - protocol: tcp
+          direction: ingress
+          remote_ip_prefix: 158.193.0.0/16
+          port_range_max: 80
+          port_range_min: 80
+        - protocol: icmp
+          direction: ingress
+          remote_ip_prefix: 158.193.0.0/16
+        - direction: egress
+          remote_ip_prefix: 0.0.0.0/0
+
+  internal_secgroup:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: Internal-security-group
+      rules:
+        - protocol: tcp
+          direction: ingress
+          remote_ip_prefix: 10.0.0.0/24
+          port_range_max: 22
+          port_range_min: 22
+        - protocol: tcp
+          direction: ingress
+          remote_ip_prefix: 10.0.0.0/24
+          port_range_max: 80
+          port_range_min: 80
+        - protocol: icmp
+          direction: ingress
+          remote_ip_prefix: 10.0.0.0/24
+        - direction: egress
+          remote_ip_prefix: 0.0.0.0/0
+        - protocol: tcp
+          direction: ingress
+          remote_ip_prefix: 10.0.0.0/24
+          port_range_max: 3128
+          port_range_min: 3128
+
+  JumpPort:
+    type: OS::Neutron::Port
+    properties:
+      name: JumpPort
+      fixed_ips:
+        - ip_address: 10.0.0.10
+      network: {get_resource: Net}
+      security_groups:
+        - {get_resource: jump_secgroup}
+
+  ProxyPort:
+    type: OS::Neutron::Port
+    properties:
+      name: JumpPort
+      fixed_ips:
+        - ip_address: 10.0.0.20
+      network: {get_resource: Net}
+      security_groups:
+        - {get_resource: internal_secgroup}
+
+  WebServerPort:
+    type: OS::Neutron::Port
+    properties:
+      name: JumpPort
+      fixed_ips:
+        - ip_address: 10.0.0.30
+      network: {get_resource: Net}
+      security_groups:
+        - {get_resource: internal_secgroup}
+  Jump:
+    type: OS::Nova::Server
+    properties:
+      name: Jump
+      availability_zone: compute1
+      flavor: linux
+      image: ubuntu_server_18.04_amd64_Openstack
+      user_data_update_policy: REPLACE
+      key_name: kluc2-NOVY
+      networks:
+        - port: { get_resource: JumpPort }
+      user_data_format: RAW
+      user_data: |
+        #!/bin/bash
+        sudo apt-get update -y
+        sudo apt-get install mcedit -y
+        sudo apt-get install nmap -y
+
+        echo "sudo iptables -t nat -A PREROUTING -s 158.193.0.0/16 -d 10.0.0.10/32 -p tcp -m tcp --dport 80 -j DNAT --to-destination 10.0.0.20:80" >> /home/ubuntu/iptab.txt
+        echo "sudo iptables -t nat -A POSTROUTING -s 158.193.0.0/16 -d 10.0.0.20/32 -p tcp -m tcp --dport 80 -j SNAT --to-source 10.0.0.10" >> /home/ubuntu/iptab.txt
+
+        sudo echo 1 > /proc/sys/net/ipv4/ip_forward
+        sudo iptables -t nat -A PREROUTING -s 158.193.0.0/16 -d 10.0.0.10/32 -p tcp -m tcp --dport 80 -j DNAT --to-destination 10.0.0.20:80
+        sudo iptables -t nat -A POSTROUTING -s 158.193.0.0/16 -d 10.0.0.20/32 -p tcp -m tcp --dport 80 -j SNAT --to-source 10.0.0.10
+
+
+#sudo iptables -t nat -A PREROUTING -s 158.193.0.0/16 -d 10.0.0.4/32 -p tcp -m tcp --dport 80 -j DNAT --to-destination 10.0.0.150:80
+#sudo iptables -t nat -A POSTROUTING -s 158.193.0.0/16 -d 10.0.0.150/32 -p tcp -m tcp --dport 80 -j SNAT --to-destination 10.0.0.4
+#sudo iptables -t nat -A POSTROUTING -s 158.193.0.0/16 -d 10.0.0.150/32 -p tcp -m tcp --dport 80 -j SNAT --to-source 10.0.0.4
+
+  Proxy:
+    type: OS::Nova::Server
+    properties:
+      name: Proxy-Server
+      availability_zone: compute1
+      flavor: linux
+      image: ubuntu_server_18.04_amd64_Openstack
+      user_data_update_policy: REPLACE
+      key_name: kluc2-NOVY
+      networks:
+        - port: { get_resource: WebServerPort }
+      user_data_format: RAW
+      user_data: |
+        #!/bin/bash
+        sudo apt-get update -y
+        sudo apt-get install squid -y
+
+        sudo systemctl enable squid
+        sudo systemctl start squid
+
+
+  WebServer:
+    type: OS::Nova::Server
+    properties:
+      name: Web-Server
+      availability_zone: compute1
+      flavor: linux
+      image: ubuntu_server_18.04_amd64_Openstack
+      user_data_update_policy: REPLACE
+      key_name: kluc2-NOVY
+      networks:
+        - port: { get_resource: ProxyPort }
+      user_data_format: RAW
+      user_data: |
+        #!/bin/bash
+        sudo apt-get update -y
+        sudo apt-get install apache2 -y
+
+        echo "http_proxy=\"http://10.0.0.30:3128/\"" >> /etc/enviroment
+        echo "https_proxy=\"http://10.0.0.30:3128/\"" >> /etc/enviroment
+        echo "no_proxy=\"localhost,127.0.0.1/\"" >> /etc/enviroment
+
+  JumpFloatingIp:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network: ext-net
+      #port_id: {get_resource: JumpPort}
+
+  JumpFloatingIpAssociation:
+    type: OS::Neutron::FloatingIPAssociation
+    properties:
+      floatingip_id: {get_resource: JumpFloatingIp}
+      port_id: {get_resource: JumpPort}
